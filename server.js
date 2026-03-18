@@ -2,55 +2,9 @@ require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const mysql = require('mysql2/promise');
-const { Resend } = require('resend');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
-
-// ─── Resend Mailer ────────────────────────────────────────────────────────────
-const resend = new Resend('re_Di9qDLqZ_EMeLs5f3SQmgo8TFaQMhZtU7');
-const MAIL_FROM = process.env.MAIL_FROM || 'FlowOS <no-reply@yourdomain.com>';
-
-const sendMail = (to, subject, html) =>
-  resend.emails.send({ from: MAIL_FROM, to, subject, html })
-    .catch(err => console.error('📧 Mail error:', err.message));
-
-const mailer = {
-  taskAssigned: (to, { taskTitle, projectName, assigneeName, dueDate }) =>
-    sendMail(to, `📋 Task Assigned: ${taskTitle}`, `
-      <div style="font-family:sans-serif;max-width:520px;margin:auto">
-        <h2 style="color:#1a1a2e">Hi ${assigneeName},</h2>
-        <p>You've been assigned a new task in <b>${projectName}</b>:</p>
-        <table style="border-collapse:collapse;width:100%;margin-top:12px">
-          <tr><td style="padding:10px;background:#f5f5f5;font-weight:bold">Task</td><td style="padding:10px;border:1px solid #eee">${taskTitle}</td></tr>
-          <tr><td style="padding:10px;background:#f5f5f5;font-weight:bold">Project</td><td style="padding:10px;border:1px solid #eee">${projectName}</td></tr>
-          <tr><td style="padding:10px;background:#f5f5f5;font-weight:bold">Due Date</td><td style="padding:10px;border:1px solid #eee">${dueDate || 'Not set'}</td></tr>
-        </table>
-        <p style="margin-top:20px;color:#555">Log in to FlowOS to view and manage your task.</p>
-      </div>`),
-
-  dueDateReminder: (to, { taskTitle, projectName, dueDate }) =>
-    sendMail(to, `⏰ Due Soon: ${taskTitle}`, `
-      <div style="font-family:sans-serif;max-width:520px;margin:auto">
-        <h2 style="color:#e63946">Task Due Reminder</h2>
-        <p>The following task is due soon:</p>
-        <table style="border-collapse:collapse;width:100%;margin-top:12px">
-          <tr><td style="padding:10px;background:#f5f5f5;font-weight:bold">Task</td><td style="padding:10px;border:1px solid #eee">${taskTitle}</td></tr>
-          <tr><td style="padding:10px;background:#f5f5f5;font-weight:bold">Project</td><td style="padding:10px;border:1px solid #eee">${projectName}</td></tr>
-          <tr><td style="padding:10px;background:#f5f5f5;font-weight:bold">Due Date</td><td style="padding:10px;border:1px solid #eee">${dueDate}</td></tr>
-        </table>
-        <p style="margin-top:20px;color:#555">Please complete this task on time.</p>
-      </div>`),
-
-  projectInvite: (to, { memberName, projectName, role, addedBy }) =>
-    sendMail(to, `🚀 You've been added to ${projectName}`, `
-      <div style="font-family:sans-serif;max-width:520px;margin:auto">
-        <h2 style="color:#1a1a2e">Hi ${memberName},</h2>
-        <p><b>${addedBy || 'An admin'}</b> has added you to the project <b>${projectName}</b> as <b>${role}</b>.</p>
-        <p style="margin-top:20px;color:#555">Log in to FlowOS to get started.</p>
-      </div>`),
-};
-// ─────────────────────────────────────────────────────────────────────────────
 
 console.log('DB_HOST:', process.env.DB_HOST);
 console.log('DB_PORT:', process.env.DB_PORT);
@@ -77,8 +31,6 @@ pool.getConnection()
   .catch(err => { console.error('❌ DB failed:', err.message); });
 
 app.get('/api/health', (_req, res) => res.json({ status: 'ok', timestamp: new Date().toISOString() }));
-
-// ─── Clients ──────────────────────────────────────────────────────────────────
 
 app.get('/api/clients', async (_req, res) => {
   try {
@@ -132,8 +84,6 @@ app.delete('/api/clients/:id', async (req, res) => {
     res.json({ message: 'Deleted' });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
-
-// ─── Projects ─────────────────────────────────────────────────────────────────
 
 app.get('/api/projects', async (_req, res) => {
   try {
@@ -204,8 +154,6 @@ app.delete('/api/projects/:id', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// ─── Tasks ────────────────────────────────────────────────────────────────────
-
 app.get('/api/tasks', async (req, res) => {
   try {
     let q = `SELECT t.*, tm.name AS assignee_name, tm.role AS assignee_role,
@@ -250,21 +198,6 @@ app.post('/api/tasks', async (req, res) => {
       SELECT t.*, tm.name AS assignee_name, tm.role AS assignee_role,
              tm.department AS assignee_dept, tm.initials AS assignee_ini
       FROM tasks t LEFT JOIN team_members tm ON t.assigned_to=tm.id WHERE t.id=?`, [r.insertId]);
-
-    // 📧 Notify assignee on task creation
-    if (assigned_to && rows[0]?.assignee_name) {
-      const [member] = await pool.query('SELECT email FROM team_members WHERE id=?', [assigned_to]);
-      const [proj]   = await pool.query('SELECT name FROM projects WHERE id=?', [project_id]);
-      if (member[0]?.email) {
-        await mailer.taskAssigned(member[0].email, {
-          taskTitle:    rows[0].title,
-          projectName:  proj[0]?.name || '',
-          assigneeName: rows[0].assignee_name,
-          dueDate:      rows[0].due_date,
-        });
-      }
-    }
-
     res.status(201).json(rows[0]);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -306,21 +239,6 @@ app.patch('/api/tasks/:id/assign', async (req, res) => {
       SELECT t.*, tm.name AS assignee_name, tm.role AS assignee_role,
              tm.department AS assignee_dept, tm.initials AS assignee_ini
       FROM tasks t LEFT JOIN team_members tm ON t.assigned_to=tm.id WHERE t.id=?`, [req.params.id]);
-
-    // 📧 Notify new assignee on reassign
-    if (assigned_to && rows[0]?.assignee_name) {
-      const [member] = await pool.query('SELECT email FROM team_members WHERE id=?', [assigned_to]);
-      const [proj]   = await pool.query('SELECT name FROM projects WHERE id=?', [rows[0].project_id]);
-      if (member[0]?.email) {
-        await mailer.taskAssigned(member[0].email, {
-          taskTitle:    rows[0].title,
-          projectName:  proj[0]?.name || '',
-          assigneeName: rows[0].assignee_name,
-          dueDate:      rows[0].due_date,
-        });
-      }
-    }
-
     res.json(rows[0]);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -332,8 +250,6 @@ app.delete('/api/tasks/:id', async (req, res) => {
     res.json({ message: 'Deleted' });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
-
-// ─── Team ─────────────────────────────────────────────────────────────────────
 
 app.get('/api/team', async (_req, res) => {
   try {
@@ -368,17 +284,6 @@ app.post('/api/team', async (req, res) => {
       [name, role, department, email||null, initials]
     );
     const [rows] = await pool.query('SELECT * FROM team_members WHERE id=?', [r.insertId]);
-
-    // 📧 Welcome / project invite email to new team member
-    if (email) {
-      await mailer.projectInvite(email, {
-        memberName: name,
-        projectName: 'FlowOS',
-        role:        role,
-        addedBy:     req.body.added_by || 'Admin',
-      });
-    }
-
     res.status(201).json(rows[0]);
   } catch (e) {
     if (e.code === 'ER_DUP_ENTRY') return res.status(409).json({ error: 'Email already exists' });
@@ -410,7 +315,6 @@ app.delete('/api/team/:id', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// ─── Error handlers ───────────────────────────────────────────────────────────
 app.use((_req, res) => res.status(404).json({ error: 'Route not found' }));
 app.use((err, _req, res, _next) => res.status(500).json({ error: err.message }));
 
