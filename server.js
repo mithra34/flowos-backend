@@ -279,7 +279,7 @@ app.post('/api/tasks', async (req, res) => {
     if (assigned_to && task.assignee_name) {
       const html = emailTemplate('📋 New Task Assigned', task.assignee_name,
         [['Task', title], ['Project', task.project_name], ['Priority', priority||'medium'], ['Department', department||'Website'], ['Due Date', due_date||null]],
-        'You have been assigned a new task in FlowOS. Please review the details below and get started.'
+        'You have been assigned a new task . Please review the details below and get started.'
       );
       await notifyMember(assigned_to, `📋 New Task: ${title}`, html);
     }
@@ -309,7 +309,7 @@ app.put('/api/tasks/:id', async (req, res) => {
     if (assigned_to && prev[0] && prev[0].assigned_to != assigned_to) {
       const html = emailTemplate('📋 Task Assigned to You', task.assignee_name,
         [['Task', title], ['Project', task.project_name], ['Priority', priority||'medium'], ['Department', department||'Website']],
-        'A task has been assigned to you in FlowOS.'
+        'A task has been assigned to you.'
       );
       await notifyMember(assigned_to, `📋 Task Assigned: ${title}`, html);
     }
@@ -335,7 +335,7 @@ app.patch('/api/tasks/:id/status', async (req, res) => {
       const label = {pending:'Pending',in_progress:'In Progress',blocked:'Blocked',completed:'Completed'}[status]||status;
       const html = emailTemplate('🔄 Task Status Updated', task.assignee_name,
         [['Task', task.title], ['Project', task.project_name], ['New Status', label]],
-        'The status of your task has been updated in FlowOS.'
+        'The status of your task has been updated .'
       );
       await notifyMember(task.assigned_to, `🔄 Status Update: ${task.title}`, html);
     }
@@ -360,7 +360,7 @@ app.patch('/api/tasks/:id/assign', async (req, res) => {
     if (assigned_to && task.assignee_name) {
       const html = emailTemplate('📋 Task Assigned to You', task.assignee_name,
         [['Task', task.title], ['Project', task.project_name], ['Priority', task.priority], ['Department', task.department]],
-        'You have been assigned a task in FlowOS. Log in to view the details.'
+        'You have been assigned a task . Log in to view the details.'
       );
       await notifyMember(assigned_to, `📋 Task Assigned: ${task.title}`, html);
     }
