@@ -21,26 +21,10 @@ const pool = mysql.createPool({
   connectionLimit: 10,
   queueLimit: 0,
 });
+
 pool.getConnection()
   .then(c => { console.log('✅ MySQL connected'); c.release(); })
-  .catch(err => { console.error('❌ DB failed:', err.message); });
-```
-
-Commit the change.
-
----
-
-**Fix 3 — Set hardcoded variables in Railway**
-
-Click **flowos-backend** → **Variables** tab → delete all existing DB variables → add each one manually with the **real values** you copied from MySQL service:
-```
-DB_HOST     = monorail.proxy.rlwy.net   ← real value from MySQL
-DB_PORT     = 12345                      ← real port from MySQL  
-DB_USER     = root                       ← real user
-DB_PASSWORD = xxxxxxxx                   ← real password
-DB_NAME     = railway
-PORT        = 3000
-ALLOWED_ORIGIN = *
+  .catch(err => { console.error('❌ DB failed:', err.message); process.exit(1); });
 
 // ─── Health ───────────────────────────────────────────────────────────────────
 app.get('/api/health', (_req, res) => res.json({ status: 'ok', timestamp: new Date().toISOString() }));
