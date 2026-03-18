@@ -6,17 +6,21 @@ const mysql = require('mysql2/promise');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+console.log('DB_HOST:', process.env.DB_HOST);
+console.log('DB_PORT:', process.env.DB_PORT);
+console.log('DB_USER:', process.env.DB_USER);
+console.log('DB_NAME:', process.env.DB_NAME);
+
 app.use(cors({ origin: '*', methods: ['GET','POST','PUT','DELETE','PATCH'], allowedHeaders: ['Content-Type'] }));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// ─── DB Pool ─────────────────────────────────────────────────────────────────
 const pool = mysql.createPool({
-  host:     process.env.DB_HOST || 'localhost',
+  host:     process.env.DB_HOST || 'mysql.railway.internal',
   port:     parseInt(process.env.DB_PORT) || 3306,
-  user:     process.env.DB_USER,
-  password: process.env.DB_PASSWORD,
-  database: process.env.DB_NAME,
+  user:     process.env.DB_USER || 'root',
+  password: process.env.DB_PASSWORD || 'VsUxWidVQlQGZFPLTfOERbnjcQzZOpoa',
+  database: process.env.DB_NAME || 'railway',
   waitForConnections: true,
   connectionLimit: 10,
   queueLimit: 0,
@@ -24,12 +28,10 @@ const pool = mysql.createPool({
 
 pool.getConnection()
   .then(c => { console.log('✅ MySQL connected'); c.release(); })
-  .catch(err => { console.error('❌ DB failed:', err.message); process.exit(1); });
+  .catch(err => { console.error('❌ DB failed:', err.message); });
 
-// ─── Health ───────────────────────────────────────────────────────────────────
 app.get('/api/health', (_req, res) => res.json({ status: 'ok', timestamp: new Date().toISOString() }));
 
-// ─── CLIENTS ─────────────────────────────────────────────────────────────────
 app.get('/api/clients', async (_req, res) => {
   try {
     const [rows] = await pool.query('SELECT * FROM clients ORDER BY created_at DESC');
@@ -83,7 +85,6 @@ app.delete('/api/clients/:id', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// ─── PROJECTS ─────────────────────────────────────────────────────────────────
 app.get('/api/projects', async (_req, res) => {
   try {
     const [rows] = await pool.query(`
@@ -153,7 +154,6 @@ app.delete('/api/projects/:id', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// ─── TASKS ────────────────────────────────────────────────────────────────────
 app.get('/api/tasks', async (req, res) => {
   try {
     let q = `SELECT t.*, tm.name AS assignee_name, tm.role AS assignee_role,
@@ -191,8 +191,7 @@ app.post('/api/tasks', async (req, res) => {
   if (!title || !project_id) return res.status(422).json({ error: 'title and project_id are required' });
   try {
     const [r] = await pool.query(
-      `INSERT INTO tasks (title,project_id,department,priority,assigned_to,due_date,description,status)
-       VALUES (?,?,?,?,?,?,?,'pending')`,
+      `INSERT INTO tasks (title,project_id,department,priority,assigned_to,due_date,description,status) VALUES (?,?,?,?,?,?,?,'pending')`,
       [title, project_id, department||'Website', priority||'medium', assigned_to||null, due_date||null, description||null]
     );
     const [rows] = await pool.query(`
@@ -252,7 +251,6 @@ app.delete('/api/tasks/:id', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// ─── TEAM ─────────────────────────────────────────────────────────────────────
 app.get('/api/team', async (_req, res) => {
   try {
     const [rows] = await pool.query(`
@@ -317,7 +315,6 @@ app.delete('/api/team/:id', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// ─── 404 ──────────────────────────────────────────────────────────────────────
 app.use((_req, res) => res.status(404).json({ error: 'Route not found' }));
 app.use((err, _req, res, _next) => res.status(500).json({ error: err.message }));
 
