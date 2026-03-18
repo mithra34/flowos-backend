@@ -30,8 +30,79 @@ pool.getConnection()
   .then(c => { console.log('✅ MySQL connected'); c.release(); })
   .catch(err => { console.error('❌ DB failed:', err.message); });
 
+// ─── EMAIL (Resend) ───────────────────────────────────────────────────────────
+const RESEND_KEY = process.env.RESEND_API_KEY || 're_Di9qDLqZ_EMeLs5f3SQmgo8TFaQMhZtU7';
+const FROM_EMAIL = process.env.FROM_EMAIL || 'FlowOS <onboarding@resend.dev>';
+
+async function sendEmail(to, subject, html) {
+  try {
+    const res = await fetch('https://api.resend.com/emails', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${RESEND_KEY}` },
+      body: JSON.stringify({ from: FROM_EMAIL, to: [to], subject, html })
+    });
+    const data = await res.json();
+    if (data.id) console.log('✅ Email sent to', to);
+    else console.error('❌ Email failed:', JSON.stringify(data));
+  } catch (e) { console.error('❌ Email error:', e.message); }
+}
+
+async function notifyMember(memberId, subject, html) {
+  if (!memberId) return;
+  try {
+    const [rows] = await pool.query('SELECT * FROM team_members WHERE id=?', [memberId]);
+    if (!rows.length) return;
+    const member = rows[0];
+    if (member.email) await sendEmail(member.email, subject, html);
+    else console.log('⚠ No email for member:', member.name);
+  } catch (e) { console.error('❌ notifyMember error:', e.message); }
+}
+
+function emailTemplate(heading, memberName, rows, note) {
+  const rowsHtml = rows.map((([k,v],i) => `<tr style="background:${i%2?'#fff':'#f5f7ff'}"><td style="padding:10px 14px;border:1px solid #e0e0e0;font-weight:bold;width:130px">${k}</td><td style="padding:10px 14px;border:1px solid #e0e0e0">${v||'—'}</td></tr>`)).join('');
+  return `<div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;background:#f9f9f9;padding:20px">
+    <div style="background:#4A7CFF;padding:20px;border-radius:8px 8px 0 0"><h1 style="color:#fff;margin:0;font-size:20px">⬡ FlowOS</h1></div>
+    <div style="background:#fff;padding:24px;border-radius:0 0 8px 8px;border:1px solid #e0e0e0">
+      <h2 style="color:#1a1a2e;margin-top:0">${heading}</h2>
+      <p style="color:#555">Hi <strong>${memberName}</strong>,</p>
+      <p style="color:#555">${note}</p>
+      <table style="width:100%;border-collapse:collapse;margin:16px 0">${rowsHtml}</table>
+      <p style="color:#888;font-size:13px;margin-top:24px;border-top:1px solid #eee;padding-top:16px">— FlowOS Project Management</p>
+    </div>
+  </div>`;
+}
+
+// ─── DEADLINE CHECKER (every hour) ───────────────────────────────────────────
+async function checkDeadlines() {
+  try {
+    const [tasks] = await pool.query(`
+      SELECT t.*, tm.name AS member_name, tm.email, p.name AS project_name
+      FROM tasks t
+      LEFT JOIN team_members tm ON t.assigned_to = tm.id
+      LEFT JOIN projects p ON t.project_id = p.id
+      WHERE t.status != 'completed'
+        AND t.due_date IS NOT NULL
+        AND t.due_date BETWEEN CURDATE() AND DATE_ADD(CURDATE(), INTERVAL 1 DAY)
+        AND t.assigned_to IS NOT NULL
+    `);
+    for (const task of tasks) {
+      if (!task.email) continue;
+      const html = emailTemplate('⏰ Task Due Tomorrow', task.member_name,
+        [['Task', task.title], ['Project', task.project_name], ['Priority', task.priority], ['Due Date', task.due_date]],
+        'This is a reminder that the following task is due <strong>tomorrow</strong>. Please complete it on time.'
+      );
+      await sendEmail(task.email, `⏰ Reminder: "${task.title}" is due tomorrow`, html);
+      console.log('📅 Deadline reminder sent for:', task.title);
+    }
+  } catch (e) { console.error('❌ Deadline check error:', e.message); }
+}
+setInterval(checkDeadlines, 60 * 60 * 1000);
+setTimeout(checkDeadlines, 5000);
+
+// ─── Health ───────────────────────────────────────────────────────────────────
 app.get('/api/health', (_req, res) => res.json({ status: 'ok', timestamp: new Date().toISOString() }));
 
+// ─── CLIENTS ─────────────────────────────────────────────────────────────────
 app.get('/api/clients', async (_req, res) => {
   try {
     const [rows] = await pool.query('SELECT * FROM clients ORDER BY created_at DESC');
@@ -85,6 +156,7 @@ app.delete('/api/clients/:id', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// ─── PROJECTS ────────────────────────────────────────────────────────────────
 app.get('/api/projects', async (_req, res) => {
   try {
     const [rows] = await pool.query(`
@@ -154,6 +226,7 @@ app.delete('/api/projects/:id', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// ─── TASKS ────────────────────────────────────────────────────────────────────
 app.get('/api/tasks', async (req, res) => {
   try {
     let q = `SELECT t.*, tm.name AS assignee_name, tm.role AS assignee_role,
@@ -196,9 +269,21 @@ app.post('/api/tasks', async (req, res) => {
     );
     const [rows] = await pool.query(`
       SELECT t.*, tm.name AS assignee_name, tm.role AS assignee_role,
-             tm.department AS assignee_dept, tm.initials AS assignee_ini
-      FROM tasks t LEFT JOIN team_members tm ON t.assigned_to=tm.id WHERE t.id=?`, [r.insertId]);
-    res.status(201).json(rows[0]);
+             tm.department AS assignee_dept, tm.initials AS assignee_ini,
+             p.name AS project_name
+      FROM tasks t LEFT JOIN team_members tm ON t.assigned_to=tm.id
+      LEFT JOIN projects p ON t.project_id=p.id WHERE t.id=?`, [r.insertId]);
+    const task = rows[0];
+
+    // ── Email: task assigned ──────────────────────────────────────────────────
+    if (assigned_to && task.assignee_name) {
+      const html = emailTemplate('📋 New Task Assigned', task.assignee_name,
+        [['Task', title], ['Project', task.project_name], ['Priority', priority||'medium'], ['Department', department||'Website'], ['Due Date', due_date||null]],
+        'You have been assigned a new task in FlowOS. Please review the details below and get started.'
+      );
+      await notifyMember(assigned_to, `📋 New Task: ${title}`, html);
+    }
+    res.status(201).json(task);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -206,6 +291,7 @@ app.put('/api/tasks/:id', async (req, res) => {
   const { title, project_id, department, priority, assigned_to, due_date, description, status } = req.body;
   if (!title || !project_id) return res.status(422).json({ error: 'title and project_id are required' });
   try {
+    const [prev] = await pool.query('SELECT * FROM tasks WHERE id=?', [req.params.id]);
     const [r] = await pool.query(
       'UPDATE tasks SET title=?,project_id=?,department=?,priority=?,assigned_to=?,due_date=?,description=?,status=? WHERE id=?',
       [title, project_id, department||'Website', priority||'medium', assigned_to||null, due_date||null, description||null, status||'pending', req.params.id]
@@ -213,9 +299,21 @@ app.put('/api/tasks/:id', async (req, res) => {
     if (!r.affectedRows) return res.status(404).json({ error: 'Not found' });
     const [rows] = await pool.query(`
       SELECT t.*, tm.name AS assignee_name, tm.role AS assignee_role,
-             tm.department AS assignee_dept, tm.initials AS assignee_ini
-      FROM tasks t LEFT JOIN team_members tm ON t.assigned_to=tm.id WHERE t.id=?`, [req.params.id]);
-    res.json(rows[0]);
+             tm.department AS assignee_dept, tm.initials AS assignee_ini,
+             p.name AS project_name
+      FROM tasks t LEFT JOIN team_members tm ON t.assigned_to=tm.id
+      LEFT JOIN projects p ON t.project_id=p.id WHERE t.id=?`, [req.params.id]);
+    const task = rows[0];
+
+    // ── Email: reassigned to new member ──────────────────────────────────────
+    if (assigned_to && prev[0] && prev[0].assigned_to != assigned_to) {
+      const html = emailTemplate('📋 Task Assigned to You', task.assignee_name,
+        [['Task', title], ['Project', task.project_name], ['Priority', priority||'medium'], ['Department', department||'Website']],
+        'A task has been assigned to you in FlowOS.'
+      );
+      await notifyMember(assigned_to, `📋 Task Assigned: ${title}`, html);
+    }
+    res.json(task);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -224,8 +322,23 @@ app.patch('/api/tasks/:id/status', async (req, res) => {
   if (!['pending','in_progress','blocked','completed'].includes(status))
     return res.status(422).json({ error: 'Invalid status' });
   try {
+    const [prev] = await pool.query(`
+      SELECT t.*, tm.name AS assignee_name, p.name AS project_name
+      FROM tasks t LEFT JOIN team_members tm ON t.assigned_to=tm.id
+      LEFT JOIN projects p ON t.project_id=p.id WHERE t.id=?`, [req.params.id]);
     const [r] = await pool.query('UPDATE tasks SET status=? WHERE id=?', [status, req.params.id]);
     if (!r.affectedRows) return res.status(404).json({ error: 'Not found' });
+
+    // ── Email: status changed ─────────────────────────────────────────────────
+    if (prev[0] && prev[0].assigned_to) {
+      const task = prev[0];
+      const label = {pending:'Pending',in_progress:'In Progress',blocked:'Blocked',completed:'Completed'}[status]||status;
+      const html = emailTemplate('🔄 Task Status Updated', task.assignee_name,
+        [['Task', task.title], ['Project', task.project_name], ['New Status', label]],
+        'The status of your task has been updated in FlowOS.'
+      );
+      await notifyMember(task.assigned_to, `🔄 Status Update: ${task.title}`, html);
+    }
     res.json({ id: req.params.id, status });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -237,9 +350,21 @@ app.patch('/api/tasks/:id/assign', async (req, res) => {
     if (!r.affectedRows) return res.status(404).json({ error: 'Not found' });
     const [rows] = await pool.query(`
       SELECT t.*, tm.name AS assignee_name, tm.role AS assignee_role,
-             tm.department AS assignee_dept, tm.initials AS assignee_ini
-      FROM tasks t LEFT JOIN team_members tm ON t.assigned_to=tm.id WHERE t.id=?`, [req.params.id]);
-    res.json(rows[0]);
+             tm.department AS assignee_dept, tm.initials AS assignee_ini,
+             p.name AS project_name
+      FROM tasks t LEFT JOIN team_members tm ON t.assigned_to=tm.id
+      LEFT JOIN projects p ON t.project_id=p.id WHERE t.id=?`, [req.params.id]);
+    const task = rows[0];
+
+    // ── Email: assigned via assign button ─────────────────────────────────────
+    if (assigned_to && task.assignee_name) {
+      const html = emailTemplate('📋 Task Assigned to You', task.assignee_name,
+        [['Task', task.title], ['Project', task.project_name], ['Priority', task.priority], ['Department', task.department]],
+        'You have been assigned a task in FlowOS. Log in to view the details.'
+      );
+      await notifyMember(assigned_to, `📋 Task Assigned: ${task.title}`, html);
+    }
+    res.json(task);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -251,6 +376,7 @@ app.delete('/api/tasks/:id', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// ─── TEAM ─────────────────────────────────────────────────────────────────────
 app.get('/api/team', async (_req, res) => {
   try {
     const [rows] = await pool.query(`
