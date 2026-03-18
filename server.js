@@ -61,13 +61,13 @@ async function notifyMember(memberId, subject, html) {
 function emailTemplate(heading, memberName, rows, note) {
   const rowsHtml = rows.map((([k,v],i) => `<tr style="background:${i%2?'#fff':'#f5f7ff'}"><td style="padding:10px 14px;border:1px solid #e0e0e0;font-weight:bold;width:130px">${k}</td><td style="padding:10px 14px;border:1px solid #e0e0e0">${v||'—'}</td></tr>`)).join('');
   return `<div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;background:#f9f9f9;padding:20px">
-    <div style="background:#4A7CFF;padding:20px;border-radius:8px 8px 0 0"><h1 style="color:#fff;margin:0;font-size:20px">⬡ FlowOS</h1></div>
+    <div style="background:#4A7CFF;padding:20px;border-radius:8px 8px 0 0"><h1 style="color:#fff;margin:0;font-size:20px">VICORPORATE</h1></div>
     <div style="background:#fff;padding:24px;border-radius:0 0 8px 8px;border:1px solid #e0e0e0">
       <h2 style="color:#1a1a2e;margin-top:0">${heading}</h2>
       <p style="color:#555">Hi <strong>${memberName}</strong>,</p>
       <p style="color:#555">${note}</p>
       <table style="width:100%;border-collapse:collapse;margin:16px 0">${rowsHtml}</table>
-      <p style="color:#888;font-size:13px;margin-top:24px;border-top:1px solid #eee;padding-top:16px">— FlowOS Project Management</p>
+      <p style="color:#888;font-size:13px;margin-top:24px;border-top:1px solid #eee;padding-top:16px">— VICORPORATE Project Management</p>
     </div>
   </div>`;
 }
